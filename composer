@@ -1,0 +1,160 @@
+#!/bin/python3
+import argparse
+from configparser import ConfigParser
+import logging
+import requests
+import subprocess
+import sys
+import tempfile
+import time
+import os
+
+_log = None
+
+
+class ComposeFailure(Exception):
+    pass
+
+
+def run_command(cmd, stdin=None):
+    _log.debug('Running commangd: %s', cmd)
+    _log.debug('Stdin: %s', stdin)
+    p = subprocess.Popen(cmd,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    stdout, stderr = p.communicate(stdin)
+    rc = p.wait()
+
+    if rc != 0:
+        raise ComposeFailure('Command failed, status: %s, out: %s, err: %s'
+                             % (rc, stdout, stderr))
+
+    return rc, stdout, stderr
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Hatlocker Compose script')
+    parser.add_argument('--quiet', '-q', default=False, action='store_true')
+    parser.add_argument('--verbose', '-v', default=0, action='count')
+    parser.add_argument('--configuration', '-c', default='compose.cfg',
+                        help='Compose config file')
+    parser.add_argument('--workdir',
+                        help='Working directory (temp if not specified)')
+    return parser.parse_args()
+
+
+def setup_logging(verbosity):
+    global _log
+
+    level = None
+    if verbosity == -1:
+        level = logging.CRITICAL
+    elif verbosity == 0:
+        level = logging.ERROR
+    elif verbosity == 1:
+        level = logging.WARNING
+    elif verbosity == 2:
+        level = logging.INFO
+    elif verbosity >= 3:
+        level = logging.DEBUG
+
+    logging.basicConfig(level=level)
+    _log = logging.getLogger(__name__)
+
+
+def get_definitions(workdir, config):
+    run_command(['git', 'clone', config['definitions']['git_url'],
+                 os.path.join(workdir, 'definitions')])
+
+
+def build_base_image(tdl, ks, **kwargs):
+    params = {}
+    params['offline_icicle'] = '1'
+    with open(ks) as f:
+        params['install_script'] = f.read()
+    with open(tdl) as f:
+        params['template'] = f.read()
+    params.update(kwargs)
+
+    _log.info('Base image arguments: %s', params)
+
+    res = requests.post('http://localhost:8080',
+                        data=params)
+    _log.info('Response code: %s', res.status_code)
+    _log.debug('Response: %s', res.text)
+
+    res.raise_for_status()
+    res = res.json()
+    imageid = res['base_image']['id']
+    status = res['base_image']['status']
+
+    _log.info('Task ID: %s', imageid)
+    _log.info('Waiting for build to finish...')
+
+    while status in ['NEW', 'PENDING', 'BUILDING']:
+        _log.debug('Status: %s, percentage: %s%',
+                   status, res['base_image']['percent_complete'])
+        time.sleep(10)
+        res = requests.get('http://localhost:8080/base_images/%s'
+                           % imageid).json()
+        status = res['base_image']['status']
+
+    status = res['base_image']['status']
+    _log.info('Final status: %s', status)
+
+    if status != 'COMPLETE':
+        raise ComposeFailure('Base image build failed with status %s' % status)
+
+    return imageid
+
+
+curphase = None
+def phase_msg(phase=None):
+    global curphase
+    if phase:
+        curphase = phase
+        _log.info('START: %s', phase)
+    else:
+        _log.info('DONE: %s', curphase)
+
+
+def compose(workdir, config):
+    _log.info('Initializing compose')
+
+    # Getting definitions
+    phase_msg('Get definitions')
+    get_definitions(workdir, config)
+    phase_msg()
+
+    # Build base image
+    phase_msg('Building base image')
+    imgid = build_base_image(os.path.join(workdir, 'definitions',
+                                          config['definitions']['tdl']),
+                             os.path.join(workdir, 'definitions',
+                                          config['definitions']['kickstart']))
+    phase_msg()
+
+
+
+def main():
+    args = parse_args()
+    config = ConfigParser()
+    if len(config.read(args.configuration)) != 1:
+        print('Invalid configuration file specified')
+        sys.exit(1)
+    if args.quiet:
+        args.verbose = -1
+    setup_logging(args.verbose)
+
+    _log.debug('Arguments: %s', args)
+
+    if args.workdir is None:
+        args.workdir = tempfile.mkdtemp(prefix='hatlocker-composer-workdir-')
+
+    _log.debug('Workdir: %s', args.workdir)
+
+    compose(args.workdir, config)
+
+
+if __name__ == '__main__':
+    main()
