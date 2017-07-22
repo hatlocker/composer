@@ -78,7 +78,7 @@ def build_base_image(tdl, ks, **kwargs):
 
     _log.info('Base image arguments: %s', params)
 
-    res = requests.post('http://localhost:8080',
+    res = requests.post('http://localhost:8080/imagefactory/base_images',
                         data=params)
     _log.info('Response code: %s', res.status_code)
     _log.debug('Response: %s', res.text)
@@ -95,7 +95,7 @@ def build_base_image(tdl, ks, **kwargs):
         _log.debug('Status: %s, percentage: %s%',
                    status, res['base_image']['percent_complete'])
         time.sleep(10)
-        res = requests.get('http://localhost:8080/base_images/%s'
+        res = requests.get('http://localhost:8080/imagefactory/base_images/%s'
                            % imageid).json()
         status = res['base_image']['status']
 
