@@ -92,7 +92,7 @@ def build_base_image(tdl, ks, **kwargs):
     _log.info('Waiting for build to finish...')
 
     while status in ['NEW', 'PENDING', 'BUILDING']:
-        _log.debug('Status: %s, percentage: %s%',
+        _log.debug('Status: %s, percentage: %s',
                    status, res['base_image']['percent_complete'])
         time.sleep(10)
         res = requests.get('http://localhost:8080/imagefactory/base_images/%s'
