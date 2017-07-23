@@ -17,12 +17,13 @@ class ComposeFailure(Exception):
     pass
 
 
-def run_command(cmd, stdin=None):
+def run_command(cmd, stdin=None, **kwargs):
     _log.debug('Running commangd: %s', cmd)
     _log.debug('Stdin: %s', stdin)
     p = subprocess.Popen(cmd,
                          stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE)
+                         stderr=subprocess.PIPE,
+                         **kwargs)
     stdout, stderr = p.communicate(stdin)
     rc = p.wait()
 
@@ -113,6 +114,9 @@ def setup_logging(verbosity):
 def get_definitions(workdir, config):
     run_command(['git', 'clone', config['definitions']['git_url'],
                  os.path.join(workdir, 'definitions')])
+    stdout, stderr = run_command(['git', 'rev-parse', 'HEAD'],
+                                 cwd=os.path.join(workdir, 'definitions'))
+    _log.info('Definitions hash: %s', stdout.strip())
 
 
 def build_base_image(tdl, ks, **kwargs):
