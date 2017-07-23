@@ -123,12 +123,16 @@ def phase_msg(phase=None):
 def compose(workdir, config, imgid):
     _log.info('Initializing compose')
 
-    # Getting definitions
-    phase_msg('Get definitions')
-    get_definitions(workdir, config)
-    phase_msg()
+    if imgid is not None:
+        if not os.path.isdir(os.path.join(workdir, 'definitions')):
+            raise ComposeFailure('Incorrect workdir specified')
+        _log.info('Continuing with provided image ID and definitions')
+    else:
+        # Getting definitions
+        phase_msg('Get definitions')
+        get_definitions(workdir, config)
+        phase_msg()
 
-    if imgid is None:
         # Build base image
         phase_msg('Building base image')
         imgid = build_base_image(
