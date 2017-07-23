@@ -82,7 +82,7 @@ def create_verity_table(workdir):
             if roothash is not None:
                 raise ComposeFailure('Second root hash line found')
             roothash = line.split()[-1]
-            if len(roothash) != 128:
+            if len(roothash) != 64:
                 raise ComposeFailure('Roothash length not expected')
     if uuid is None:
         raise ComposeFailure('No UUID found')
