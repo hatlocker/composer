@@ -167,7 +167,7 @@ def extract_image(workdir, bodyfile):
     _log.info('Root volume downloaded')
 
     _log.info('Clearing up GuestFS')
-    g.unmount_all()
+    g.umount_all()
     _log.info('GuestFS cleared')
 
 
