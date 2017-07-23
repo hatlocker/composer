@@ -20,7 +20,7 @@ class ComposeFailure(Exception):
 
 
 def run_command(cmd, stdin=None, **kwargs):
-    _log.debug('Running commangd: %s', cmd)
+    _log.debug('Running command: %s', cmd)
     _log.debug('Stdin: %s', stdin)
     p = subprocess.Popen(cmd,
                          stdout=subprocess.PIPE,
