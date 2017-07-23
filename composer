@@ -57,7 +57,7 @@ def parse_args():
 
 def create_verity_table(workdir):
     _log.info('Creating verity table')
-    stdout, stderr = run_command(['veritysetup', 'format', '--hash=sha512',
+    stdout, stderr = run_command(['veritysetup', 'format', '--hash=sha256',
                                   os.path.join(workdir, 'rootvol'),
                                   os.path.join(workdir, 'hashvol')])
     _log.info('Verity table created, parsing')
