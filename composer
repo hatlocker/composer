@@ -137,10 +137,14 @@ def build_base_image(tdl, ks, **kwargs):
 
     res.raise_for_status()
     res = res.json()
-    imageid = res['base_image']['id']
+    return res['base_image']['id']
+
+
+def wait_for_image(imageid):
+    res = requests.get('http://localhost:8080/imagefactory/base_images/%s'
+                       % imageid).json()
     status = res['base_image']['status']
 
-    _log.info('Task ID: %s', imageid)
     _log.info('Waiting for build to finish...')
 
     while status in ['NEW', 'PENDING', 'BUILDING']:
@@ -250,8 +254,12 @@ def compose(workdir, config, args):
             os.path.join(workdir, 'definitions', config['definitions']['tdl']),
             os.path.join(workdir, 'definitions',
                          config['definitions']['kickstart']))
+        _log.info('Image ID: %s', imgid)
         phase_msg()
 
+    phase_msg('Waiting for base image to finish')
+    wait_for_image(imgid)
+    phase_msg()
     _log.info('Image ID: %s', imgid)
 
     bodyfile = config['imagefactory'].get('storage_body_path_template',
