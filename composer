@@ -43,6 +43,8 @@ def parse_args():
                         help='Working directory (temp if not specified)')
     parser.add_argument('--imageid',
                         help='Define an image ID if you want to continue')
+    parser.add_argument('--skip-extraction', action='store_true',
+                        help='Specify that guestfs extraction is done')
     return parser.parse_args()
 
 
@@ -181,7 +183,7 @@ def phase_msg(phase=None):
         _log.info('DONE: %s', curphase)
 
 
-def compose(workdir, config, imgid):
+def compose(workdir, config, imgid, skip_extraction):
     _log.info('Initializing compose')
 
     if imgid is not None:
@@ -210,9 +212,10 @@ def compose(workdir, config, imgid):
         raise ComposeFailure('Unable to find image body at %s' % bodyfile)
     _log.debug('Image body at: %s', bodyfile)
 
-    phase_msg('Extracting image contents')
-    extract_image(workdir, bodyfile)
-    phase_msg()
+    if not skip_extraction:
+        phase_msg('Extracting image contents')
+        extract_image(workdir, bodyfile)
+        phase_msg()
 
 
 def main():
@@ -232,7 +235,7 @@ def main():
 
     _log.debug('Workdir: %s', args.workdir)
 
-    compose(args.workdir, config, args.imageid)
+    compose(args.workdir, config, args.imageid, args.skip_extraction)
 
 
 if __name__ == '__main__':
