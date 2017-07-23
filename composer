@@ -1,6 +1,7 @@
 #!/bin/python3
 import argparse
 from configparser import ConfigParser
+import guestfs
 import logging
 import requests
 import subprocess
@@ -110,6 +111,62 @@ def build_base_image(tdl, ks, **kwargs):
     return imageid
 
 
+def extract_image(workdir, bodyfile):
+    os.environ['LIBGUESTFS_BACKEND'] = 'direct'
+    g = guestfs.GuestFS(python_return_dict=True)
+    g.add_drive_opts(bodyfile, readonly=1)
+
+    _log.info('Launching GuestFS')
+    g.launch()
+    _log.info('GuestFS ready')
+    oss = g.inspect_os()
+    _log.debug('OSs: %s', oss)
+    if len(oss) != 1:
+        raise ComposeFailure('Not exactly one OS found')
+    osroot = oss[0]
+
+    _log.info('Mounting /boot')
+    mps = g.inspect_get_mountpoints(root)
+    if not '/' in mps:
+        raise ComposeFailure('No / found')
+    if not '/boot' in mps:
+        raise ComposeFailure('No /boot found')
+    g.mount_ro(mps['/boot'], '/boot')
+    rootvol = mps['/']
+    _log.info('/boot mounted')
+
+    _log.info('Downloading kernel data')
+    vmlinuz = None
+    initramfs = None
+    for fname in g.ls('/boot'):
+        if fname.startswith('vmlinuz-') and not 'rescue' in fname:
+            _log.debug('Vmlinuz found: %s', fname)
+            if vmlinuz is not None:
+                raise ComposeFailure('More than one vmlinuz found')
+            vmlinuz = fname
+        elif fname.startswith('initramfs-') and not 'rescue' in fname:
+            _log.debug('Initramfs found: %s', fname)
+            if initramfs is not None:
+                raise ComposeFailure('More than one initramfs found')
+            initramfs = fname
+    if not vmlinuz:
+        raise ComposeFailure('No vmlinuz found')
+    if not initramfs:
+        raise ComposeFailure('No initramfs found')
+    _log.debug('Downloading vmlinuz: %s, initramfs: %s', vmlinuz, initramfs)
+    g.download('/boot/%s' % vmlinuz, os.path.join(workdir, 'vmlinuz'))
+    g.download('/boot/%s' % initramfs, os.path.join(workdir, 'initramfs'))
+    _log.info('Kernel data downloaded')
+
+    _log.info('Downloading root volume')
+    g.download(rootvol, os.path.join(workdir, 'rootvol.img'))
+    _log.info('Root volume downloaded')
+
+    _log.info('Clearing up GuestFS')
+    g.unmount_all()
+    _log.info('GuestFS cleared')
+
+
 curphase = None
 def phase_msg(phase=None):
     global curphase
@@ -145,11 +202,13 @@ def compose(workdir, config, imgid):
 
     bodyfile = config['imagefactory'].get('storage_body_path_template',
                                           vars={'imgid': imgid})
-
     if not os.path.isfile(bodyfile):
         raise ComposeFailure('Unable to find image body at %s' % bodyfile)
-
     _log.debug('Image body at: %s', bodyfile)
+
+    phase_msg('Extracting image contents')
+    extract_image(workdir, bodyfile)
+    phase_msg()
 
 
 def main():
