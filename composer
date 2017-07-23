@@ -183,12 +183,13 @@ def phase_msg(phase=None):
         _log.info('DONE: %s', curphase)
 
 
-def compose(workdir, config, imgid, skip_extraction):
+def compose(workdir, config, args):
     _log.info('Initializing compose')
 
-    if imgid is not None:
+    if args.imageid is not None:
         if not os.path.isdir(os.path.join(workdir, 'definitions')):
             raise ComposeFailure('Incorrect workdir specified')
+        imgid = args.imageid
         _log.info('Continuing with provided image ID and definitions')
     else:
         # Getting definitions
@@ -212,7 +213,7 @@ def compose(workdir, config, imgid, skip_extraction):
         raise ComposeFailure('Unable to find image body at %s' % bodyfile)
     _log.debug('Image body at: %s', bodyfile)
 
-    if not skip_extraction:
+    if not args.skip_extraction:
         phase_msg('Extracting image contents')
         extract_image(workdir, bodyfile)
         phase_msg()
@@ -235,7 +236,7 @@ def main():
 
     _log.debug('Workdir: %s', args.workdir)
 
-    compose(args.workdir, config, args.imageid, args.skip_extraction)
+    compose(args.workdir, config, args)
 
 
 if __name__ == '__main__':
