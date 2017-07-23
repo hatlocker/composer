@@ -1,6 +1,8 @@
 #!/bin/python3
 import argparse
 from configparser import ConfigParser
+from datetime import datetime
+from jinja2 import Template
 import guestfs
 import logging
 import requests
@@ -119,11 +121,10 @@ def get_definitions(workdir, config):
     _log.info('Definitions hash: %s', stdout.strip())
 
 
-def build_base_image(tdl, ks, **kwargs):
+def build_base_image(tdl, kscts, **kwargs):
     params = {}
     params['offline_icicle'] = '1'
-    with open(ks) as f:
-        params['install_script'] = f.read()
+    params['install_script'] = kscts
     with open(tdl) as f:
         params['template'] = f.read()
     params.update(kwargs)
@@ -162,6 +163,15 @@ def wait_for_image(imageid):
         raise ComposeFailure('Base image build failed with status %s' % status)
 
     return imageid
+
+
+def get_kickstart(workdir, config):
+    tmpl = None
+    with open(os.path.join(workdir, config['definitions']['kickstart'])) as f:
+        tmpl = Template(f.read())
+    env = {}
+    env['now'] = datetime.utcnow().isoformat(timespec='minutes') + 'Z'
+    return template.render(**env)
 
 
 def extract_image(workdir, bodyfile):
@@ -248,12 +258,16 @@ def compose(workdir, config, args):
         get_definitions(workdir, config)
         phase_msg()
 
+        phase_msg('Generate kickstart')
+        kscts = get_kickstart(workdir, config)
+        _log.info('Kickstart: %s', kscts)
+        phase_msg()
+
         # Build base image
         phase_msg('Building base image')
         imgid = build_base_image(
             os.path.join(workdir, 'definitions', config['definitions']['tdl']),
-            os.path.join(workdir, 'definitions',
-                         config['definitions']['kickstart']))
+            kscts)
         _log.info('Image ID: %s', imgid)
         phase_msg()
 
