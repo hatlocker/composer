@@ -55,6 +55,8 @@ def parse_args():
                         help='Specify that guestfs extraction is done')
     parser.add_argument('--verity-uuid', help='Verity UUID')
     parser.add_argument('--verity-roothash', help='Verity root hash')
+    parser.add_argument('--skip-efi-generation', action='store_true',
+                        help='Skip EFI generation')
     return parser.parse_args()
 
 
@@ -172,6 +174,26 @@ def get_kickstart(workdir, config):
     env = {}
     env['now'] = datetime.utcnow().isoformat(timespec='minutes') + 'Z'
     return template.render(**env)
+
+
+def create_cmdline(workdir, config, uuid, roothash):
+    # TODO
+    cmdline = ''
+    _log.info('Command line: %s', cmdline)
+    with open(os.path.join(workdir, 'cmdline'), 'w') as f:
+        f.write(cmdline)
+
+
+def create_efi_binary(workdir, config, cmdline):
+    run_command(
+        ['objcopy',
+         '--add-section', '.osrel=%s' % os.path.join(workdir,
+                                                     'definitions',
+                                                     'osrelease'),
+         '--add-section', '.cmdline=%s' % os.path.join(workdir, 'cmdline'),
+         '--add-section', '.linux=%s' % os.path.join(workdir, 'vmlinuz'),
+         '--add-section', '.initrd=%s' % os.path.join(workdir, 'initramfs'),
+         config['efi']['stub_path'], os.path.join(workdir, 'efiapp')])
 
 
 def extract_image(workdir, bodyfile):
@@ -294,6 +316,15 @@ def compose(workdir, config, args):
     else:
         uuid = args.verity_uuid
         roothash = args.verity_roothash
+
+    if not args.skip_efi_generation:
+        phase_msg('Generating kernel command line')
+        create_cmdline(workdir, config, uuid, roothash)
+        phase_msg()
+
+        phase_msg('Generating EFI binary')
+        create_efi_binary(workdir, config, cmdline)
+        phase_msg()
 
 
 def main():
