@@ -143,6 +143,13 @@ def compose(workdir, config, imgid):
 
     _log.info('Image ID: %s', imgid)
 
+    bodyfile = (config['imagefactory']['storage_body_path_template']
+                % {'imgid': imgid})
+
+    if not os.path.isfile(bodyfile):
+        raise ComposeFailure('Unable to find image body at %s' % bodyfile)
+
+    _log.debug('Image body at: %s', bodyfile)
 
 
 def main():
