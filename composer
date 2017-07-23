@@ -125,15 +125,19 @@ def extract_image(workdir, bodyfile):
         raise ComposeFailure('Not exactly one OS found')
     osroot = oss[0]
 
-    _log.info('Mounting /boot')
-    mps = g.inspect_get_mountpoints(root)
+    _log.info('Mounting filesystem')
+    mps = g.inspect_get_mountpoints(osroot)
+    _log.debug('Mountpoints: %s', mps)
     if not '/' in mps:
         raise ComposeFailure('No / found')
     if not '/boot' in mps:
         raise ComposeFailure('No /boot found')
+    if len(mps) != 2:
+        raise ComposeFailure('Extra partitions found')
+    g.mount_ro(mps['/'], '/')
     g.mount_ro(mps['/boot'], '/boot')
     rootvol = mps['/']
-    _log.info('/boot mounted')
+    _log.info('Filesystems mounted')
 
     _log.info('Downloading kernel data')
     vmlinuz = None
