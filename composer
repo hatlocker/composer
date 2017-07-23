@@ -26,11 +26,15 @@ def run_command(cmd, stdin=None):
     stdout, stderr = p.communicate(stdin)
     rc = p.wait()
 
+    _log.debug('Return code: %s', rc)
+    _log.debug('Stdout: %s', stdout)
+    _log.debug('Stderr: %s', stderr)
+
     if rc != 0:
         raise ComposeFailure('Command failed, status: %s, out: %s, err: %s'
                              % (rc, stdout, stderr))
 
-    return rc, stdout, stderr
+    return stdout, stderr
 
 
 def parse_args():
@@ -46,7 +50,44 @@ def parse_args():
                         help='Define an image ID if you want to continue')
     parser.add_argument('--skip-extraction', action='store_true',
                         help='Specify that guestfs extraction is done')
+    parser.add_argument('--verity-uuid', help='Verity UUID')
+    parser.add_argument('--verity-roothash', help='Verity root hash')
     return parser.parse_args()
+
+
+def create_verity_table(workdir):
+    _log.info('Creating verity table')
+    stdout, stderr = run_command(['veritysetup', 'format', '--hash=sha512',
+                                  os.path.join(workdir, 'rootvol'),
+                                  os.path.join(workdir, 'hashvol')])
+    _log.info('Verity table created, parsing')
+
+    uuid = None
+    roothash = None
+    for line in stdout.split('\n'):
+        line = line.strip()
+        if line.startswith('UUID:'):
+            _log.debug('UUID line found: %s', line)
+            if uuid is not None:
+                raise ComposeFailure('Second UUID line found')
+            uuid = line.split()[-1]
+            if len(uuid) != 36:
+                raise ComposeFailure('UUID length not expected')
+        elif line.startswith('Root hash:'):
+            _log.debug('Roothash line found: %s' % line)
+            if roothash is not None:
+                raise ComposeFailure('Second root hash line found')
+            roothash = line.split()[-1]
+            if len(roothash) != 128:
+                raise ComposeFailure('Roothash length not expected')
+    if uuid is None:
+        raise ComposeFailure('No UUID found')
+    if roothash is None:
+        raise ComposeFailure('No root hash found')
+    _log.info('UUID: %s', uuid)
+    _log.info('Root hash: %s', roothash)
+
+    return uuid, roothash
 
 
 def setup_logging(verbosity):
@@ -166,7 +207,7 @@ def extract_image(workdir, bodyfile):
     _log.info('Kernel data downloaded')
 
     _log.info('Downloading root volume')
-    g.download(rootvol, os.path.join(workdir, 'rootvol.img'))
+    g.download(rootvol, os.path.join(workdir, 'rootvol'))
     _log.info('Root volume downloaded')
 
     _log.info('Clearing up GuestFS')
@@ -217,6 +258,11 @@ def compose(workdir, config, args):
     if not args.skip_extraction:
         phase_msg('Extracting image contents')
         extract_image(workdir, bodyfile)
+        phase_msg()
+
+    if not args.verity_uuid:
+        phase_msg('Creating verity hash volume')
+        uuid, roothash = create_verity_table(workdir)
         phase_msg()
 
 
