@@ -177,8 +177,15 @@ def get_kickstart(workdir, config):
 
 
 def create_cmdline(workdir, config, uuid, roothash):
-    # TODO
-    cmdline = ''
+    cmds = ['root=/dev/mapper/rootfs',
+            'console=tty0',
+            'console=ttyS0,115200',
+            'rhgb',
+            'quiet',
+            'LANG=en_US.UTF-8',
+            'hatlocker.verity_uuid=%s' % uuid,
+            'hatlocker.verity_roothash=%s' % roothash]
+    cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
         f.write(cmdline)
