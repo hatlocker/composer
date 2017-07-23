@@ -41,6 +41,7 @@ def parse_args():
                         help='Compose config file')
     parser.add_argument('--workdir',
                         help='Working directory (temp if not specified)')
+    # Arguments below this are for skipping compose steps for debugging
     parser.add_argument('--imageid',
                         help='Define an image ID if you want to continue')
     parser.add_argument('--skip-extraction', action='store_true',
