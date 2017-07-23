@@ -184,7 +184,7 @@ def create_cmdline(workdir, config, uuid, roothash):
         f.write(cmdline)
 
 
-def create_efi_binary(workdir, config, cmdline):
+def create_efi_binary(workdir, config):
     run_command(
         ['objcopy',
          '--add-section', '.osrel=%s' % os.path.join(workdir,
