@@ -323,7 +323,7 @@ def compose(workdir, config, args):
         phase_msg()
 
         phase_msg('Generating EFI binary')
-        create_efi_binary(workdir, config, cmdline)
+        create_efi_binary(workdir, config)
         phase_msg()
 
 
