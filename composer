@@ -176,15 +176,15 @@ def get_kickstart(workdir, config):
     return template.render(**env)
 
 
-def create_cmdline(workdir, config, blkuuid, hashvol, roothash):
+def create_cmdline(workdir, config, rootuuid, hashuuid, roothash):
     cmds = ['root=/dev/mapper/rootfs',
             'console=tty0',
             'console=ttyS0,115200',
             'rhgb',
             'quiet',
             'LANG=en_US.UTF-8',
-            'verity=blkuuid=%s,hashvol=%s,roothash=%s' %
-            (blkuuid, hashvol, roothash)]
+            'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,roothash=%s' %
+            (rootuuid, hashuuid, roothash)]
     cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
@@ -263,9 +263,9 @@ def extract_image(workdir, bodyfile):
     _log.info('GuestFS cleared')
 
 
-def get_rootvol_uuid(workdir):
+def get_blkfile_uuid(workdir, filename):
     stdout, stderr = run_command(['blkid',
-                                  os.path.join(workdir, 'rootvol')])
+                                  os.path.join(workdir, filename)])
     stdout = stdout.strip().split()
     blkuuid = None
     for part in stdout:
@@ -277,7 +277,7 @@ def get_rootvol_uuid(workdir):
             blkuuid = part[6:-1]
             if len(blkuuid) != 36:
                 raise ComposeFailure('UUID length unexpected')
-    _log.info('Rootvol blkuuid: %s', blkuuid)
+    _log.info('%s blkuuid: %s', filename, blkuuid)
     return blkuuid
 
 
@@ -342,16 +342,14 @@ def compose(workdir, config, args):
         uuid = args.verity_uuid
         roothash = args.verity_roothash
 
-    # TODO: Determine hashvol name
-    hashvol = 'hashvol'
-
-    phase_msg('Determining rootvol uuid')
-    blkuuid = get_rootvol_uuid(workdir)
+    phase_msg('Determining block uuids')
+    rootuuid = get_blkfile_uuid(workdir, 'rootvol')
+    hashuuid = get_blkfile_uuid(workdir, 'hashvol')
     phase_msg()
 
     if not args.skip_efi_generation:
         phase_msg('Generating kernel command line')
-        create_cmdline(workdir, config, blkuuid, hashvol, roothash)
+        create_cmdline(workdir, config, rootuuid, hashuuid, roothash)
         phase_msg()
 
         phase_msg('Generating EFI binary')
