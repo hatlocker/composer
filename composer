@@ -176,15 +176,16 @@ def get_kickstart(workdir, config):
     return template.render(**env)
 
 
-def create_cmdline(workdir, config, rootuuid, hashuuid, roothash):
+def create_cmdline(workdir, config, rootuuid, hashuuid, verityuuid, roothash):
     cmds = ['root=/dev/mapper/rootfs',
             'console=tty0',
             'console=ttyS0,115200',
             'rhgb',
             'quiet',
             'LANG=en_US.UTF-8',
-            'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,roothash=%s' %
-            (rootuuid, hashuuid, roothash)]
+            'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,verityuuid=%s,'
+            'roothash=%s' %
+            (rootuuid, hashuuid, verityuuid, roothash)]
     cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
@@ -336,10 +337,10 @@ def compose(workdir, config, args):
 
     if not args.verity_uuid:
         phase_msg('Creating verity hash volume')
-        uuid, roothash = create_verity_table(workdir)
+        verityuuid, roothash = create_verity_table(workdir)
         phase_msg()
     else:
-        uuid = args.verity_uuid
+        verityuuid = args.verity_uuid
         roothash = args.verity_roothash
 
     phase_msg('Determining block uuids')
@@ -349,7 +350,8 @@ def compose(workdir, config, args):
 
     if not args.skip_efi_generation:
         phase_msg('Generating kernel command line')
-        create_cmdline(workdir, config, rootuuid, hashuuid, roothash)
+        create_cmdline(workdir, config, rootuuid, hashuuid, verityuuid,
+                       roothash)
         phase_msg()
 
         phase_msg('Generating EFI binary')
