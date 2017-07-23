@@ -264,6 +264,9 @@ def compose(workdir, config, args):
         phase_msg('Creating verity hash volume')
         uuid, roothash = create_verity_table(workdir)
         phase_msg()
+    else:
+        uuid = args.verity_uuid
+        roothash = args.verity_roothash
 
 
 def main():
