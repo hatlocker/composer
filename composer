@@ -124,17 +124,20 @@ def get_definitions(workdir, config):
 
 
 def build_base_image(tdl, kscts, **kwargs):
+    template = None
+    with open(tdl) as f:
+        template = f.read()
+
     params = {}
     params['offline_icicle'] = '1'
     params['install_script'] = kscts
-    with open(tdl) as f:
-        params['template'] = f.read()
     params.update(kwargs)
 
     _log.info('Base image arguments: %s', params)
 
     res = requests.post('http://localhost:8080/imagefactory/base_images',
-                        data=params)
+                        json={'base_image': {'template': template,
+                                             'parameters': params})
     _log.info('Response code: %s', res.status_code)
     _log.debug('Response: %s', res.text)
 
