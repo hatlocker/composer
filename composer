@@ -245,7 +245,7 @@ def extract_image(workdir, bodyfile):
             if vmlinuz is not None:
                 raise ComposeFailure('More than one vmlinuz found')
             vmlinuz = fname
-        elif fname.startswith('initramfs-') and not 'rescue' in fname:
+        elif fname.startswith('hlinitramfs-') and not 'rescue' in fname:
             _log.debug('Initramfs found: %s', fname)
             if initramfs is not None:
                 raise ComposeFailure('More than one initramfs found')
