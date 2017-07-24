@@ -1,4 +1,3 @@
-- Write and add dracut module
 - Fix /etc
 - Sign EFI image
 - Test by booting
