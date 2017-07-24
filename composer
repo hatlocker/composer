@@ -169,7 +169,8 @@ def wait_for_image(imageid):
 
 def get_kickstart(workdir, config):
     tmpl = None
-    with open(os.path.join(workdir, config['definitions']['kickstart'])) as f:
+    with open(os.path.join(workdir, 'definitions',
+                           config['definitions']['kickstart'])) as f:
         tmpl = Template(f.read())
     env = {}
     env['now'] = datetime.utcnow().isoformat(timespec='minutes') + 'Z'
