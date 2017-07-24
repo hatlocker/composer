@@ -137,7 +137,7 @@ def build_base_image(tdl, kscts, **kwargs):
 
     res = requests.post('http://localhost:8080/imagefactory/base_images',
                         json={'base_image': {'template': template,
-                                             'parameters': params})
+                                             'parameters': params}})
     _log.info('Response code: %s', res.status_code)
     _log.debug('Response: %s', res.text)
 
