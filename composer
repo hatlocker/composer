@@ -373,7 +373,7 @@ def compose(workdir, config, args):
     phase_msg()
 
     phase_msg('Determining block uuid')
-    rootuuid = get_blkfile_uuid(workdir, 'combinedvol')
+    rootuuid = get_blkfile_uuid(workdir, 'rootvol')
     phase_msg()
 
     if not args.skip_efi_generation:
