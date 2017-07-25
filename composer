@@ -201,10 +201,10 @@ def create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
 
 
 def combine_files(dst, *srcs):
-    with open(dst, 'w') as dstf:
+    with open(dst, 'wb') as dstf:
         for src in srcs:
-            with open(src, 'r') as srcf:
-                shutil.copyfileobj(dstf, srcf)
+            with open(src, 'rb') as srcf:
+                shutil.copyfileobj(srcf, dstf)
 
 
 def create_efi_binary(workdir, config):
