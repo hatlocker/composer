@@ -48,6 +48,8 @@ def parse_args():
                         help='Compose config file')
     parser.add_argument('--workdir',
                         help='Working directory (temp if not specified)')
+    parser.add_argument('--version',
+                        help='Specify custom version other than YYYYMMDDHHMM')
     # Arguments below this are for skipping compose steps for debugging
     parser.add_argument('--imageid',
                         help='Define an image ID if you want to continue')
@@ -170,13 +172,13 @@ def wait_for_image(imageid):
     return imageid
 
 
-def get_kickstart(workdir, config):
+def get_kickstart(workdir, config, version):
     tmpl = None
     with open(os.path.join(workdir, 'definitions',
                            config['definitions']['kickstart'])) as f:
         tmpl = Template(f.read())
     env = {}
-    env['now'] = datetime.utcnow().isoformat(timespec='minutes') + 'Z'
+    env['version'] = version
     return tmpl.render(**env)
 
 
@@ -297,7 +299,7 @@ def phase_msg(phase=None):
 
 
 def compose(workdir, config, args):
-    _log.info('Initializing compose')
+    _log.info('Initializing compose for version %s', args.version)
 
     if args.imageid is not None:
         if not os.path.isdir(os.path.join(workdir, 'definitions')):
@@ -311,7 +313,7 @@ def compose(workdir, config, args):
         phase_msg()
 
         phase_msg('Generate kickstart')
-        kscts = get_kickstart(workdir, config)
+        kscts = get_kickstart(workdir, config, args.version)
         _log.info('Kickstart: %s', kscts)
         phase_msg()
 
@@ -369,6 +371,8 @@ def main():
     if len(config.read(args.configuration)) != 1:
         print('Invalid configuration file specified')
         sys.exit(1)
+    if not args.version:
+        args.version = datetime.utcnow().strftime('%Y%m%d%H%M')
     if args.quiet:
         args.verbose = -1
     setup_logging(args.verbose)
