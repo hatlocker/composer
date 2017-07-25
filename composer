@@ -5,6 +5,7 @@ from datetime import datetime
 from jinja2 import Template
 import guestfs
 import logging
+import lzma
 import requests
 import subprocess
 import shutil
@@ -200,8 +201,12 @@ def create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
         f.write(cmdline)
 
 
-def combine_files(dst, *srcs):
-    with open(dst, 'wb') as dstf:
+def combine_files(dst, *srcs, **kwargs):
+    openfunc = open
+    if kwargs.get('lzma', False):
+        openfunc = lzma.open
+
+    with openfunc(dst, 'wb') as dstf:
         for src in srcs:
             with open(src, 'rb') as srcf:
                 shutil.copyfileobj(srcf, dstf)
@@ -363,7 +368,8 @@ def compose(workdir, config, args):
     if not os.path.exists(os.path.join(workdir, 'combinedvol')):
         combine_files(os.path.join(workdir, 'combinedvol'),
                       os.path.join(workdir, 'rootvol'),
-                      os.path.join(workdir, 'hashvol'))
+                      os.path.join(workdir, 'hashvol'),
+                      lzma=True)
     phase_msg()
 
     phase_msg('Determining block uuid')
