@@ -7,6 +7,7 @@ import guestfs
 import logging
 import requests
 import subprocess
+import shutil
 import sys
 import tempfile
 import time
@@ -182,7 +183,8 @@ def get_kickstart(workdir, config, version):
     return tmpl.render(**env)
 
 
-def create_cmdline(workdir, config, rootuuid, hashuuid, verityuuid, roothash):
+def create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
+                   roothash):
     cmds = ['root=/dev/mapper/rootfs',
             'console=tty0',
             'console=ttyS0,115200',
@@ -190,12 +192,19 @@ def create_cmdline(workdir, config, rootuuid, hashuuid, verityuuid, roothash):
             'quiet',
             'LANG=en_US.UTF-8',
             'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,verityuuid=%s,'
-            'roothash=%s' %
-            (rootuuid, hashuuid, verityuuid, roothash)]
+            'roothash=%s,offset=%s' %
+            (rootuuid, rootuuid, verityuuid, roothash, hash_offset)]
     cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
         f.write(cmdline)
+
+
+def combine_files(dst, *srcs):
+    with open(dst, 'w') as dstf:
+        for src in srcs:
+            with open(src, 'r') as srcf:
+                shutil.copyfileobj(dstf, srcf)
 
 
 def create_efi_binary(workdir, config):
@@ -349,14 +358,21 @@ def compose(workdir, config, args):
         verityuuid = args.verity_uuid
         roothash = args.verity_roothash
 
-    phase_msg('Determining block uuids')
-    rootuuid = get_blkfile_uuid(workdir, 'rootvol')
-    hashuuid = get_blkfile_uuid(workdir, 'hashvol')
+    phase_msg('Combining volumes')
+    hash_offset = os.path.getsize(os.path.join(workdir, 'rootvol'))
+    if not os.path.exists(os.path.join(workdir, 'combinedvol')):
+        combine_files(os.path.join(workdir, 'combinedvol'),
+                      os.path.join(workdir, 'rootvol'),
+                      os.path.join(workdir, 'hashvol'))
+    phase_msg()
+
+    phase_msg('Determining block uuid')
+    rootuuid = get_blkfile_uuid(workdir, 'combinedvol')
     phase_msg()
 
     if not args.skip_efi_generation:
         phase_msg('Generating kernel command line')
-        create_cmdline(workdir, config, rootuuid, hashuuid, verityuuid,
+        create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
                        roothash)
         phase_msg()
 
