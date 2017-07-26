@@ -99,7 +99,7 @@ def create_verity_table(workdir):
     _log.info('UUID: %s', uuid)
     _log.info('Root hash: %s', roothash)
 
-    return uuid, roothash
+    return roothash
 
 
 def setup_logging(verbosity):
