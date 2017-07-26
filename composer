@@ -51,14 +51,15 @@ def parse_args():
                         help='Compose config file')
     parser.add_argument('--workdir',
                         help='Working directory (temp if not specified)')
+    parser.add_argument('--auto-version', default=False, action='store_true',
+                        help='Automatically generate compose version')
     parser.add_argument('--version',
-                        help='Specify custom version other than YYYYMMDDHHMM')
+                        help='Compose version')
     # Arguments below this are for skipping compose steps for debugging
     parser.add_argument('--imageid',
                         help='Define an image ID if you want to continue')
     parser.add_argument('--skip-extraction', action='store_true',
                         help='Specify that guestfs extraction is done')
-    parser.add_argument('--verity-uuid', help='Verity UUID')
     parser.add_argument('--verity-roothash', help='Verity root hash')
     parser.add_argument('--skip-efi-generation', action='store_true',
                         help='Skip EFI generation')
@@ -185,17 +186,15 @@ def get_kickstart(workdir, config, version):
     return tmpl.render(**env)
 
 
-def create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
-                   roothash):
-    cmds = ['root=/dev/mapper/rootfs',
+def create_cmdline(workdir, config, rootuuid, roothash):
+    cmds = ['root=/dev/mapper/usr',
             'rhgb',
             'quiet',
             'rd.auto=1',
             'rd.emergency=reboot',
             'LANG=en_US.UTF-8',
-            'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,verityuuid=%s,'
-            'roothash=%s,offset=%s' %
-            (rootuuid, rootuuid, verityuuid, roothash, hash_offset)]
+            'verity.usr=UUID=%s' % rootuuid,
+            'verity.usrhash=%s' % roothash]
     cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
@@ -362,16 +361,14 @@ def compose(workdir, config, args):
         extract_image(workdir, bodyfile)
         phase_msg()
 
-    if not args.verity_uuid:
+    if not args.verity_roothash:
         phase_msg('Creating verity hash volume')
-        verityuuid, roothash = create_verity_table(workdir)
+        roothash = create_verity_table(workdir)
         phase_msg()
     else:
-        verityuuid = args.verity_uuid
         roothash = args.verity_roothash
 
     phase_msg('Combining volumes')
-    hash_offset = os.path.getsize(os.path.join(workdir, 'rootvol'))
     if not os.path.exists(os.path.join(workdir, 'combinedvol')):
         combine_files(os.path.join(workdir, 'combinedvol'),
                       os.path.join(workdir, 'rootvol'),
@@ -385,8 +382,7 @@ def compose(workdir, config, args):
 
     if not args.skip_efi_generation:
         phase_msg('Generating kernel command line')
-        create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
-                       roothash)
+        create_cmdline(workdir, config, rootuuid, roothash)
         phase_msg()
 
         phase_msg('Generating EFI binary')
@@ -401,6 +397,8 @@ def main():
         print('Invalid configuration file specified')
         sys.exit(1)
     if not args.version:
+        if not args.auto_version:
+            raise ComposeFailure('No version or auto-version specified')
         args.version = datetime.utcnow().strftime('%Y%m%d%H%M')
     if args.quiet:
         args.verbose = -1
