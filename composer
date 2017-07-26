@@ -188,10 +188,10 @@ def get_kickstart(workdir, config, version):
 def create_cmdline(workdir, config, rootuuid, hash_offset, verityuuid,
                    roothash):
     cmds = ['root=/dev/mapper/rootfs',
-            'console=tty0',
-            'console=ttyS0,115200',
             'rhgb',
             'quiet',
+            'rd.auto=1',
+            'rd.emergency=reboot',
             'LANG=en_US.UTF-8',
             'rd.verity=name=rootfs,datauuid=%s,hashuuid=%s,verityuuid=%s,'
             'roothash=%s,offset=%s' %
