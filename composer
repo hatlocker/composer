@@ -4,6 +4,7 @@ from configparser import ConfigParser
 from datetime import datetime
 from jinja2 import Template
 import guestfs
+import gzip
 import logging
 import lzma
 import requests
@@ -205,6 +206,8 @@ def combine_files(dst, *srcs, **kwargs):
     openfunc = open
     if kwargs.get('lzma', False):
         openfunc = lzma.open
+    elif kwargs.get('gzip', False):
+        openfunc = gzip.open
 
     with openfunc(dst, 'wb') as dstf:
         for src in srcs:
@@ -369,7 +372,7 @@ def compose(workdir, config, args):
         combine_files(os.path.join(workdir, 'combinedvol'),
                       os.path.join(workdir, 'rootvol'),
                       os.path.join(workdir, 'hashvol'),
-                      lzma=True)
+                      gzip=True)
     phase_msg()
 
     phase_msg('Determining block uuid')
