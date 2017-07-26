@@ -245,7 +245,7 @@ def extract_image(workdir, bodyfile):
     osroot = oss[0]
 
     _log.info('Mounting filesystem')
-    mps = g.inspect_get_mountpoints(osroot)
+    mps = {'/': '/dev/sda2', '/boot': '/dev/sda1'}
     _log.debug('Mountpoints: %s', mps)
     if not '/' in mps:
         raise ComposeFailure('No / found')
