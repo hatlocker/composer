@@ -53,6 +53,8 @@ def parse_args():
                         help='Working directory (temp if not specified)')
     parser.add_argument('--auto-version', default=False, action='store_true',
                         help='Automatically generate compose version')
+    parser.add_argument('--debug-build', default=False, action='store_true',
+                        help='Create a debug build')
     parser.add_argument('--version',
                         help='Compose version')
     # Arguments below this are for skipping compose steps for debugging
@@ -186,15 +188,24 @@ def get_kickstart(workdir, config, version):
     return tmpl.render(**env)
 
 
-def create_cmdline(workdir, config, rootuuid, roothash):
+def create_cmdline(workdir, debug, config, rootuuid, roothash):
     cmds = ['root=/dev/mapper/usr',
-            'rhgb',
-            'quiet',
+            'rd.lvm.lv=datavg/datavol',
+            'rd.luks.uuid=luks-ca9ea0ec-7514-11e7-a171-e4a4714acfe5',
             'rd.auto=1',
-            'rd.emergency=reboot',
             'LANG=en_US.UTF-8',
             'verity.usr=UUID=%s' % rootuuid,
             'verity.usrhash=%s' % roothash]
+    if debug:
+        cmds.extend(['text',
+                     'debug',
+                     'rd.shell',
+                     'rd.retry=10',
+                     'rd.timeout=30'])
+    else:
+        cmds.extend(['rhgb',
+                     'quiet',
+                     'rd.emergency=reboot'])
     cmdline = ' '.join(cmds)
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
@@ -382,7 +393,7 @@ def compose(workdir, config, args):
 
     if not args.skip_efi_generation:
         phase_msg('Generating kernel command line')
-        create_cmdline(workdir, config, rootuuid, roothash)
+        create_cmdline(workdir, args.debug_build, config, rootuuid, roothash)
         phase_msg()
 
         phase_msg('Generating EFI binary')
