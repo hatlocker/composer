@@ -158,7 +158,7 @@ def clone_git_repo(git_url, target, refresh=False):
     return stdout.strip()
 
 
-def build_base_image(tdl, kscts, **kwargs):
+def build_base_image(workdir, config, tdl, kscts, **kwargs):
     tmpl = None
     with open(os.path.join(workdir, 'definitions',
                            config['definitions']['kickstart'])) as f:
@@ -418,6 +418,8 @@ def compose(workdir, config, args):
         # Build base image
         phase_msg('Building base image')
         imgid = build_base_image(
+            workdir,
+            config,
             os.path.join(workdir, 'definitions', config['definitions']['tdl']),
             kscts)
         _log.info('Image ID: %s', imgid)
