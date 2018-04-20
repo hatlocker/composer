@@ -65,6 +65,8 @@ def parse_args():
     parser.add_argument('--verity-roothash', help='Verity root hash')
     parser.add_argument('--skip-efi-generation', action='store_true',
                         help='Skip EFI generation')
+    parser.add_argument('--skip-boot-testing', action='store_true',
+                        help='Skip boot testing')
     return parser.parse_args()
 
 
@@ -123,12 +125,20 @@ def setup_logging(verbosity):
     _log = logging.getLogger(__name__)
 
 
-def get_definitions(workdir, config):
-    run_command(['git', 'clone', config['definitions']['git_url'],
-                 os.path.join(workdir, 'definitions')])
+def clone_git_repo(git_url, target):
+    if os.path.exists(target):
+        # Exists, check that url is correct
+        stdout, stderr = run_command(['git', 'remote', 'get-url', 'origin'],
+                                     cwd=target)
+        if stdout.strip() != git_url:
+            raise ComposeFailure(
+                'Git clone %s existed, but remote is incorrect' % target)
+        run_command(['git', 'pull'], cwd=target)
+    else:
+        run_command(['git', 'clone', git_url, target])
     stdout, stderr = run_command(['git', 'rev-parse', 'HEAD'],
-                                 cwd=os.path.join(workdir, 'definitions'))
-    _log.info('Definitions hash: %s', stdout.strip())
+                                 cwd=target)
+    return stdout.strip()
 
 
 def build_base_image(tdl, kscts, **kwargs):
@@ -216,6 +226,35 @@ def create_cmdline(workdir, debug, config, rootuuid, roothash):
     _log.info('Command line: %s', cmdline)
     with open(os.path.join(workdir, 'cmdline'), 'w') as f:
         f.write(cmdline)
+
+
+def create_qemu_cmd(workdir, config):
+    machinetype = 'q35,smm=on'
+    if config['testing'].getboolean('use_kvm'):
+        machinetype += ',accel=kvm'
+    cmd = [
+        config['testing']['qemu_binary'],
+        '-machine', machinetype,
+        '-display', 'none',
+        '-no-user-config',
+        '-nodefaults',
+        '-m', '2048',
+        '-smp', '2,sockets=2,cores=1,threads=1',
+        '-chardev', 'pty,id=charserial1',
+        '-device', 'isa-serial,chardev=charserial1,id=serial1',
+        '-global', 'driver=cfi.pflash01,property=secure,value=on',
+        '-drive',
+        'file=%s,if=pflash,format=raw,unit=0,readonly=on' % (
+            config['testing']['ovmf_code']),
+        '-drive',
+        'file=%s,if=pflash,format=raw,unit=1,readonly=on' % (
+            config['testing']['ovmf_vars']),
+        '-drve',
+        'file=%s,format=raw,unit=2,readonly=off' % (
+            os.path.join(workdir, 'test.img')),
+        '-object', 'rng-random,id=objrng0,filename=/dev/urandom',
+        '-serial', 'stdio']
+    return cmd
 
 
 def combine_files(dst, *srcs, **kwargs):
@@ -346,7 +385,10 @@ def compose(workdir, config, args):
     else:
         # Getting definitions
         phase_msg('Get definitions')
-        get_definitions(workdir, config)
+        definitions_hash = clone_git_repo(
+            config['definitions']['git_url'],
+            os.path.join(workdir, 'definitions'))
+        _log.info('Definitions hash: %s', definitions_hash)
         phase_msg()
 
         phase_msg('Generate kickstart')
@@ -385,25 +427,50 @@ def compose(workdir, config, args):
     else:
         roothash = args.verity_roothash
 
-    phase_msg('Combining volumes')
     if not os.path.exists(os.path.join(workdir, 'combinedvol')):
+        phase_msg('Combining volumes')
         combine_files(os.path.join(workdir, 'combinedvol'),
                       os.path.join(workdir, 'rootvol'),
                       os.path.join(workdir, 'hashvol'),
                       gzip=True)
-    phase_msg()
-
-    phase_msg('Determining block uuid')
-    rootuuid = get_blkfile_uuid(workdir, 'rootvol')
-    phase_msg()
+        phase_msg()
 
     if not args.skip_efi_generation:
+        phase_msg('Determining block uuid')
+        rootuuid = get_blkfile_uuid(workdir, 'rootvol')
+        phase_msg()
+
         phase_msg('Generating kernel command line')
         create_cmdline(workdir, args.debug_build, config, rootuuid, roothash)
         phase_msg()
 
         phase_msg('Generating EFI binary')
         create_efi_binary(workdir, config)
+        phase_msg()
+
+    if not args.skip_boot_testing:
+        phase_msg('Getting installer repo')
+        installer_hash = clone_git_repo(
+            config['testing']['installer_repo'],
+            os.path.join(workdir, 'installer'))
+        _log.info('Installer hash: %s', installer_hash)
+        phase_msg()
+
+        phase_msg('Creating full disk image for testing')
+        run_command(['truncate', '--size=22G',
+                     os.path.join(workdir, 'test.img')])
+        phase_msg()
+
+        phase_msg('Partitioning disk image')
+        phase_msg()
+
+        phase_msg('Installing into test image')
+        phase_msg()
+
+        phase_msg('Boot testing')
+        cmd = create_qemu_cmd(workdir, config)
+        print('QEMU cmd: %s' % cmd)
+        print('QEMU cmd: %s' % ' '.join(cmd))
         phase_msg()
 
 
