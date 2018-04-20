@@ -137,6 +137,7 @@ def build_base_image(tdl, kscts, **kwargs):
         template = f.read()
 
     params = {}
+    params['generate_icicle'] = '0'
     params['offline_icicle'] = '1'
     params['install_script'] = kscts
     params.update(kwargs)
