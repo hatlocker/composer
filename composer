@@ -478,7 +478,7 @@ def compose(workdir, config, args):
 
         phase_msg('Preparing full disk image for testing')
         _log.debug('Emptying')
-        run_command(['truncate', '--size=22G',
+        run_command(['truncate', '--size=23G',
                      os.path.join(workdir, 'test.img')])
         run_command(['wipefs', '--force', '--all',
                      os.path.join(workdir, 'test.img')])
@@ -505,7 +505,8 @@ def compose(workdir, config, args):
                                   config['testing']['setup_script']),
                      '%sp' % devid,
                      args.version,
-                     "file://%s" % workdir])
+                     "file://%s" % workdir],
+                    sudo=True)
 
         _log.debug('Unmounting')
        # run_command(['losetup', '--detach', disk], sudo=True)
