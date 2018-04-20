@@ -22,8 +22,11 @@ class ComposeFailure(Exception):
     pass
 
 
-def run_command(cmd, stdin=None, **kwargs):
+def run_command(cmd, stdin=None, sudo=False, **kwargs):
     _log.debug('Running command: %s', cmd)
+    if sudo:
+        _log.info('Sudo command running')
+        cmd = ['sudo'] + cmd
     _log.debug('Stdin: %s', stdin)
     p = subprocess.Popen(cmd,
                          stdout=subprocess.PIPE,
@@ -41,6 +44,17 @@ def run_command(cmd, stdin=None, **kwargs):
                              % (rc, stdout, stderr))
 
     return stdout.decode('utf-8'), stderr.decode('utf-8')
+
+
+def assure_symlink(workdir, source, target):
+    source = os.path.join(workdir, source)
+    target = os.path.join(workdir, target)
+    if os.path.exists(target):
+        if os.readlink(target) == source:
+            return
+        else:
+            os.remove(target)
+    os.symlink(source, target)
 
 
 def parse_args():
@@ -450,6 +464,11 @@ def compose(workdir, config, args):
         phase_msg()
 
     if not args.skip_boot_testing:
+        phase_msg('Symlinking files')
+        assure_symlink(workdir, "efiapp", "%s.efi" % args.version)
+        assure_symlink(workdir, "combinedvol", "%s.gz" % args.version)
+        phase_msg()
+
         phase_msg('Getting installer repo')
         installer_hash = clone_git_repo(
             config['testing']['installer_repo'],
@@ -457,9 +476,39 @@ def compose(workdir, config, args):
         _log.info('Installer hash: %s', installer_hash)
         phase_msg()
 
-        phase_msg('Creating full disk image for testing')
+        phase_msg('Preparing full disk image for testing')
+        _log.debug('Emptying')
         run_command(['truncate', '--size=22G',
                      os.path.join(workdir, 'test.img')])
+        run_command(['wipefs', '--force', '--all',
+                     os.path.join(workdir, 'test.img')])
+
+        _log.debug('Mounting')
+        stdout, stderr = run_command(
+            ['losetup', '--show', '--find', os.path.join(workdir, 'test.img')],
+                    sudo=True)
+        disk = stdout.strip()
+        _log.debug('Disk: %s', disk)
+        devid = disk[len('/dev/'):]
+        _log.debug('Devid: %s', devid)
+
+        _log.debug('Partitioning')
+        run_command(["/usr/bin/bash",
+                     os.path.join(workdir, "installer",
+                                  config['testing']['partition_script']),
+                     devid],
+                    sudo=True)
+
+        _log.debug('Installing')
+        run_command(["/usr/bin/bash",
+                     os.path.join(workdir, "installer",
+                                  config['testing']['setup_script']),
+                     '%sp' % devid,
+                     args.version,
+                     "file://%s" % workdir])
+
+        _log.debug('Unmounting')
+       # run_command(['losetup', '--detach', disk], sudo=True)
         phase_msg()
 
         phase_msg('Partitioning disk image')
