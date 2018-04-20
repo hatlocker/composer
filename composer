@@ -79,6 +79,8 @@ def parse_args():
     parser.add_argument('--verity-roothash', help='Verity root hash')
     parser.add_argument('--skip-efi-generation', action='store_true',
                         help='Skip EFI generation')
+    parser.add_argument('--skip-test-image', action='store_true',
+                        help='Skip creating test image')
     parser.add_argument('--skip-boot-testing', action='store_true',
                         help='Skip boot testing')
     return parser.parse_args()
@@ -463,7 +465,7 @@ def compose(workdir, config, args):
         create_efi_binary(workdir, config)
         phase_msg()
 
-    if not args.skip_boot_testing:
+    if not args.skip_test_image:
         phase_msg('Symlinking files')
         assure_symlink(workdir, "efiapp", "%s.efi" % args.version)
         assure_symlink(workdir, "combinedvol", "%s.gz" % args.version)
@@ -505,19 +507,16 @@ def compose(workdir, config, args):
                                   config['testing']['setup_script']),
                      '%sp' % devid,
                      args.version,
-                     "file://%s" % workdir],
+                     "file://%s" % workdir,
+                     '--skip-efi',
+                     '--efi-boot'],
                     sudo=True)
 
         _log.debug('Unmounting')
-       # run_command(['losetup', '--detach', disk], sudo=True)
+        run_command(['losetup', '--detach', disk], sudo=True)
         phase_msg()
 
-        phase_msg('Partitioning disk image')
-        phase_msg()
-
-        phase_msg('Installing into test image')
-        phase_msg()
-
+    if not args.skip_boot_testing:
         phase_msg('Boot testing')
         cmd = create_qemu_cmd(workdir, config)
         print('QEMU cmd: %s' % cmd)
