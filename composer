@@ -266,7 +266,7 @@ def create_qemu_cmd(workdir, config):
         '-drive',
         'file=%s,if=pflash,format=raw,unit=1,readonly=on' % (
             config['testing']['ovmf_vars']),
-        '-drve',
+        '-drive',
         'file=%s,format=raw,unit=2,readonly=off' % (
             os.path.join(workdir, 'test.img')),
         '-object', 'rng-random,id=objrng0,filename=/dev/urandom',
