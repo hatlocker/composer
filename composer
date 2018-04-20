@@ -386,9 +386,9 @@ def phase_msg(phase=None):
     global curphase
     if phase:
         curphase = phase
-        print('START: %s', phase)
+        print('START: %s' % phase)
     else:
-        print('DONE: %s', curphase)
+        print('DONE: %s' % curphase)
 
 
 def compose(workdir, config, args):
