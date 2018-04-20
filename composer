@@ -223,10 +223,11 @@ def get_kickstart(workdir, config, version):
 
 def create_cmdline(workdir, debug, config, rootuuid, roothash):
     cmds = ['root=/dev/mapper/usr',
-            'rd.lvm.lv=datavg/datavol',
+            'rd.lvm.lv=hldatavg/datavol',
             'rd.luks.uuid=luks-ca9ea0ec-7514-11e7-a171-e4a4714acfe5',
             'rd.auto=1',
             'LANG=en_US.UTF-8',
+            'console=tty0 console=ttyS0,115200n8',
             'verity.usr=UUID=%s' % rootuuid,
             'verity.usrhash=%s' % roothash]
     if debug:
