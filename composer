@@ -125,7 +125,7 @@ def setup_logging(verbosity):
     _log = logging.getLogger(__name__)
 
 
-def clone_git_repo(git_url, target):
+def clone_git_repo(git_url, target, refresh=False):
     if os.path.exists(target):
         # Exists, check that url is correct
         stdout, stderr = run_command(['git', 'remote', 'get-url', 'origin'],
@@ -133,7 +133,8 @@ def clone_git_repo(git_url, target):
         if stdout.strip() != git_url:
             raise ComposeFailure(
                 'Git clone %s existed, but remote is incorrect' % target)
-        run_command(['git', 'pull'], cwd=target)
+        if refresh:
+            run_command(['git', 'pull'], cwd=target)
     else:
         run_command(['git', 'clone', git_url, target])
     stdout, stderr = run_command(['git', 'rev-parse', 'HEAD'],
