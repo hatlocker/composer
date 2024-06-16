@@ -15,6 +15,8 @@ import tempfile
 import time
 import os
 
+import requests_unixsocket
+
 _log = None
 
 
@@ -72,8 +74,8 @@ def parse_args():
     parser.add_argument('--version',
                         help='Compose version')
     # Arguments below this are for skipping compose steps for debugging
-    parser.add_argument('--imageid',
-                        help='Define an image ID if you want to continue')
+    parser.add_argument('--compose-id',
+                        help='Define a compose ID if you want to continue')
     parser.add_argument('--skip-extraction', action='store_true',
                         help='Specify that guestfs extraction is done')
     parser.add_argument('--verity-roothash', help='Verity root hash')
@@ -161,7 +163,7 @@ def clone_git_repo(git_url, target, refresh=False):
 def build_base_image(workdir, config, tdl, kscts, **kwargs):
     tmpl = None
     with open(os.path.join(workdir, 'definitions',
-                           config['definitions']['kickstart'])) as f:
+                           config['definitions']['blueprint'])) as f:
         tmpl = Template(f.read())
     env = {}
     env['base_version'] = config['definitions']['base_version']
@@ -210,13 +212,13 @@ def wait_for_image(imageid):
     return imageid
 
 
-def get_kickstart(workdir, config, version):
+def get_blueprint(workdir, config, version):
     tmpl = None
     with open(os.path.join(workdir, 'definitions',
-                           config['definitions']['kickstart'])) as f:
+                           config['definitions']['blueprint'])) as f:
         tmpl = Template(f.read())
     env = {}
-    env['base_version'] = config['definitions']['base_version']
+    env['distro'] = config['definitions']['distro']
     env['version'] = version
     return tmpl.render(**env)
 
@@ -396,14 +398,70 @@ def phase_msg(phase=None):
         print('DONE: %s' % curphase)
 
 
+def call_osbuild_api(config, url, *, json=None, body=None, body_type=None):
+    socket = config['compose']['composer_api'].replace("/", "%2F")
+
+    url = f"http+unix://{socket}/api/v1{url}"
+    if json is not None:
+        _log.debug(f"Calling composer CLI at {url}, with json body {body}")
+    elif body is not None:
+        if body_type is None:
+            raise ValueError("Body_type can't be None with non-None body")
+        _log.debug(f"Calling composer CLI at {url}, with body {body} (type {body_type})")
+    else:
+        _log.debug(f"Calling composer CLI GET at {url}")
+
+    session = requests_unixsocket.Session()
+    if json is not None:
+        r = session.post(
+            url,
+            json=json,
+            headers={
+                'Content-Type': 'application/json'
+            })
+    elif body is not None:
+        r = session.post(
+            url,
+            data=body,
+            headers={
+                'Content-Type': body_type,
+            })
+    else:
+        r = session.get(url)
+
+    _log.debug(f"Response: {r}")
+    result = r.json()
+    _log.debug(f"Result: {result}")
+    r.raise_for_status()
+    return result
+
+
+def compose_info(workdir, config, composeid):
+    raise Exception("composeid: %s" % composeid)
+
+
+def start_compose(workdir, config):
+    _log.info("Starting compose")
+    request = {
+        "blueprint_name": "hatlocker",
+        "compose_type": "minimal-raw",
+        "branch": "master",
+        "size": 0,
+    }
+    r = call_osbuild_api(config, "/compose", json=request)
+    _log.info("Compose started")
+
+    return r
+
+
 def compose(workdir, config, args):
     _log.info('Initializing compose for version %s', args.version)
 
-    if args.imageid is not None:
+    if args.compose_id is not None:
         if not os.path.isdir(os.path.join(workdir, 'definitions')):
             raise ComposeFailure('Incorrect workdir specified')
-        imgid = args.imageid
-        _log.info('Continuing with provided image ID and definitions')
+        composeid = args.compose_id
+        _log.info('Continuing with provided compose ID and definitions')
     else:
         # Getting definitions
         phase_msg('Get definitions')
@@ -413,20 +471,26 @@ def compose(workdir, config, args):
         _log.info('Definitions hash: %s', definitions_hash)
         phase_msg()
 
-        phase_msg('Generate kickstart')
-        kscts = get_kickstart(workdir, config, args.version)
-        _log.info('Kickstart: %s', kscts)
+        # Generate blueprint
+        phase_msg('Generate blueprint')
+        bpcts = get_blueprint(workdir, config, args.version)
+        _log.info('Blueprint: %s', bpcts)
+        phase_msg()
+
+        # Push blueprint
+        phase_msg('Pushing blueprint')
+        call_osbuild_api(config, "/blueprints/new", body=bpcts, body_type='text/x-toml')
         phase_msg()
 
         # Build base image
-        phase_msg('Building base image')
-        imgid = build_base_image(
+        phase_msg('Starting compose')
+        composeid = start_compose(
             workdir,
-            config,
-            os.path.join(workdir, 'definitions', config['definitions']['tdl']),
-            kscts)
-        _log.info('Image ID: %s', imgid)
+            config)
+        _log.info('Compose ID: %s', composeid)
         phase_msg()
+
+        raise Exception("todo")
 
     phase_msg('Waiting for base image to finish')
     wait_for_image(imgid)
