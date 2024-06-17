@@ -74,8 +74,6 @@ def parse_args():
     parser.add_argument('--version',
                         help='Compose version')
     # Arguments below this are for skipping compose steps for debugging
-    parser.add_argument('--compose-id',
-                        help='Define a compose ID if you want to continue')
     parser.add_argument('--skip-extraction', action='store_true',
                         help='Specify that guestfs extraction is done')
     parser.add_argument('--verity-roothash', help='Verity root hash')
@@ -160,56 +158,30 @@ def clone_git_repo(git_url, target, refresh=False):
     return stdout.strip()
 
 
-def build_base_image(workdir, config, tdl, kscts, **kwargs):
-    tmpl = None
-    with open(os.path.join(workdir, 'definitions',
-                           config['definitions']['blueprint'])) as f:
-        tmpl = Template(f.read())
-    env = {}
-    env['base_version'] = config['definitions']['base_version']
-    template = tmpl.render(**env)
+def wait_for_compose(config, composeid):
+    res = call_osbuild_api(
+        config,
+        f"/compose/info/{composeid}"
+    )
+    status = res['queue_status']
 
-    params = {}
-    params['generate_icicle'] = '0'
-    params['offline_icicle'] = '1'
-    params['install_script'] = kscts
-    params.update(kwargs)
+    _log.info('Waiting for compose to finish...')
 
-    _log.info('Base image arguments: %s', params)
-
-    res = requests.post('http://localhost:8075/imagefactory/base_images',
-                        json={'base_image': {'template': template,
-                                             'parameters': params}})
-    _log.info('Response code: %s', res.status_code)
-    _log.debug('Response: %s', res.text)
-
-    res.raise_for_status()
-    res = res.json()
-    return res['base_image']['id']
-
-
-def wait_for_image(imageid):
-    res = requests.get('http://localhost:8075/imagefactory/base_images/%s'
-                       % imageid).json()
-    status = res['base_image']['status']
-
-    _log.info('Waiting for build to finish...')
-
-    while status in ['NEW', 'PENDING', 'BUILDING']:
-        _log.debug('Status: %s, percentage: %s',
-                   status, res['base_image']['percent_complete'])
+    while status in ['WAITING', 'RUNNING']:
+        _log.debug(f'Status: {status}')
         time.sleep(10)
-        res = requests.get('http://localhost:8075/imagefactory/base_images/%s'
-                           % imageid).json()
-        status = res['base_image']['status']
+        res = call_osbuild_api(
+            config,
+            f"/compose/info/{composeid}"
+        )
+        status = res['queue_status']
 
-    status = res['base_image']['status']
-    _log.info('Final status: %s', status)
+    _log.info(f'Final status: {status}')
 
-    if status != 'COMPLETE':
-        raise ComposeFailure('Base image build failed with status %s' % status)
+    if status != 'FINISHED':
+        raise ComposeFailure('Compose failed with status %s' % status)
 
-    return imageid
+    return composeid
 
 
 def get_blueprint(workdir, config, version):
@@ -403,7 +375,7 @@ def call_osbuild_api(config, url, *, json=None, body=None, body_type=None):
 
     url = f"http+unix://{socket}/api/v1{url}"
     if json is not None:
-        _log.debug(f"Calling composer CLI at {url}, with json body {body}")
+        _log.debug(f"Calling composer CLI at {url}, with json body {json}")
     elif body is not None:
         if body_type is None:
             raise ValueError("Body_type can't be None with non-None body")
@@ -451,17 +423,17 @@ def start_compose(workdir, config):
     r = call_osbuild_api(config, "/compose", json=request)
     _log.info("Compose started")
 
-    return r
+    return r['build_id']
 
 
 def compose(workdir, config, args):
     _log.info('Initializing compose for version %s', args.version)
 
-    if args.compose_id is not None:
-        if not os.path.isdir(os.path.join(workdir, 'definitions')):
-            raise ComposeFailure('Incorrect workdir specified')
-        composeid = args.compose_id
-        _log.info('Continuing with provided compose ID and definitions')
+    composeidfile = os.path.join(workdir, 'composeid')
+    if os.path.exists(composeidfile):
+        _log.info('Continuing with previous compose')
+        with open(composeidfile, 'r') as f:
+            composeid = f.read().strip()
     else:
         # Getting definitions
         phase_msg('Get definitions')
@@ -490,12 +462,14 @@ def compose(workdir, config, args):
         _log.info('Compose ID: %s', composeid)
         phase_msg()
 
-        raise Exception("todo")
+        with open(composeidfile, 'w') as f:
+            f.write(composeid)
 
     phase_msg('Waiting for base image to finish')
-    wait_for_image(imgid)
+    wait_for_compose(config, composeid)
     phase_msg()
-    _log.info('Image ID: %s', imgid)
+
+    raise Exception("TODO")
 
     bodyfile = config['imagefactory'].get('storage_body_path_template',
                                           vars={'imgid': imgid})
