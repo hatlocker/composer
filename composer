@@ -11,10 +11,13 @@ import requests
 import subprocess
 import shutil
 import sys
+import tarfile
 import tempfile
 import time
 import os
 
+import cryptography
+import requests
 import requests_unixsocket
 
 _log = None
@@ -65,6 +68,8 @@ def parse_args():
     parser.add_argument('--verbose', '-v', default=0, action='count')
     parser.add_argument('--configuration', '-c', default='compose.cfg',
                         help='Compose config file')
+    parser.add_argument('--generate-keys', action='store_true',
+                        help="Generate keys that don't exist yet")
     parser.add_argument('--workdir',
                         help='Working directory (temp if not specified)')
     parser.add_argument('--auto-version', default=False, action='store_true',
@@ -74,11 +79,6 @@ def parse_args():
     parser.add_argument('--version',
                         help='Compose version')
     # Arguments below this are for skipping compose steps for debugging
-    parser.add_argument('--skip-extraction', action='store_true',
-                        help='Specify that guestfs extraction is done')
-    parser.add_argument('--verity-roothash', help='Verity root hash')
-    parser.add_argument('--skip-efi-generation', action='store_true',
-                        help='Skip EFI generation')
     parser.add_argument('--skip-test-image', action='store_true',
                         help='Skip creating test image')
     parser.add_argument('--skip-boot-testing', action='store_true',
@@ -87,6 +87,11 @@ def parse_args():
 
 
 def create_verity_table(workdir):
+    roothashfile = os.path.join(workdir, 'roothash')
+    if os.path.isfile(roothashfile):
+        with open(roothashfile, 'r') as f:
+            return f.read().strip()
+
     _log.info('Creating verity table')
     stdout, stderr = run_command(['veritysetup', 'format', '--hash=sha256',
                                   '--data-block-size=512',
@@ -118,6 +123,9 @@ def create_verity_table(workdir):
         raise ComposeFailure('No root hash found')
     _log.info('UUID: %s', uuid)
     _log.info('Root hash: %s', roothash)
+
+    with open(roothashfile, 'w') as f:
+        f.write(roothash)
 
     return roothash
 
@@ -254,16 +262,21 @@ def create_qemu_cmd(workdir, config):
 
 
 def combine_files(dst, *srcs, **kwargs):
+    if os.path.isfile(dst):
+        return
+
     openfunc = open
     if kwargs.get('lzma', False):
         openfunc = lzma.open
     elif kwargs.get('gzip', False):
         openfunc = gzip.open
 
-    with openfunc(dst, 'wb') as dstf:
+    with openfunc(dst + '.tmp', 'wb') as dstf:
         for src in srcs:
             with open(src, 'rb') as srcf:
                 shutil.copyfileobj(srcf, dstf)
+
+    os.rename(dst + '.tmp', dst)
 
 
 def create_efi_binary(workdir, config):
@@ -283,6 +296,16 @@ def create_efi_binary(workdir, config):
 
 
 def extract_image(workdir, bodyfile):
+    systemmappath = os.path.join(workdir, 'System.map')
+    vmlinuzpath = os.path.join(workdir, 'vmlinuz')
+    initrdpath = os.path.join(workdir, 'initramfs')
+    rootvolpath = os.path.join(workdir, 'rootvol')
+    if os.path.isfile(systemmappath) and \
+            os.path.isfile(vmlinuzpath) and \
+            os.path.isfile(initrdpath) and \
+            os.path.isfile(rootvolpath):
+        return
+
     os.environ['LIBGUESTFS_BACKEND'] = 'direct'
     g = guestfs.GuestFS(python_return_dict=True)
     g.add_drive_opts(bodyfile, readonly=1)
@@ -295,51 +318,69 @@ def extract_image(workdir, bodyfile):
     if len(oss) != 1:
         raise ComposeFailure('Not exactly one OS found')
     osroot = oss[0]
+    fss = g.list_filesystems()
+    _log.debug(f"Filesystems: {fss}")
+    if len(fss) != 3:
+        raise ComposeFailure("Not exactly three partitions ofund")
+    if fss['/dev/sda1'] != 'vfat':
+        raise ComposeFailure("First partition isn't vfat")
+    # The image as osbuild builds it has:
+    # sda1: /boot/efi
+    # sda2: /boot
+    # sda3: /
+
+    bootvol = '/dev/sda2'
+    rootvol = '/dev/sda3'
 
     _log.info('Mounting filesystem')
-    mps = {'/': '/dev/sda2', '/boot': '/dev/sda1'}
-    _log.debug('Mountpoints: %s', mps)
-    if not '/' in mps:
-        raise ComposeFailure('No / found')
-    if not '/boot' in mps:
-        raise ComposeFailure('No /boot found')
-    if len(mps) != 2:
-        raise ComposeFailure('Extra partitions found')
-    g.mount_ro(mps['/'], '/')
-    g.mount_ro(mps['/boot'], '/boot')
-    rootvol = mps['/']
+    g.mount_ro(rootvol, '/')
+    g.mount_ro(bootvol, '/boot')
     _log.info('Filesystems mounted')
 
     _log.info('Downloading kernel data')
+    systemmap = None
     vmlinuz = None
     initramfs = None
     for fname in g.ls('/boot'):
-        if fname.startswith('vmlinuz-') and not 'rescue' in fname:
+        if fname.startswith('System.map'):
+            _log.debug('System.map found: %s', fname)
+            if systemmap is not None:
+                raise ComposeFailure('More than one system.map found')
+            systemmap = fname
+        elif fname.startswith('vmlinuz-') and not 'rescue' in fname:
             _log.debug('Vmlinuz found: %s', fname)
             if vmlinuz is not None:
                 raise ComposeFailure('More than one vmlinuz found')
             vmlinuz = fname
-        elif fname.startswith('hlinitramfs-') and not 'rescue' in fname:
+        elif fname.startswith('initramfs-') and not 'rescue' in fname:
             _log.debug('Initramfs found: %s', fname)
             if initramfs is not None:
                 raise ComposeFailure('More than one initramfs found')
             initramfs = fname
+    if not systemmap:
+        raise ComposeFailure('No system.map found')
     if not vmlinuz:
         raise ComposeFailure('No vmlinuz found')
     if not initramfs:
         raise ComposeFailure('No initramfs found')
     _log.debug('Downloading vmlinuz: %s, initramfs: %s', vmlinuz, initramfs)
-    g.download('/boot/%s' % vmlinuz, os.path.join(workdir, 'vmlinuz'))
-    g.download('/boot/%s' % initramfs, os.path.join(workdir, 'initramfs'))
+    g.download('/boot/%s' % systemmap, systemmappath + '.tmp')
+    g.download('/boot/%s' % vmlinuz, vmlinuzpath + '.tmp')
+    g.download('/boot/%s' % initramfs, initrdpath + '.tmp')
     _log.info('Kernel data downloaded')
 
     _log.info('Downloading root volume')
-    g.download(rootvol, os.path.join(workdir, 'rootvol'))
+    g.download(rootvol, rootvolpath + '.tmp')
     _log.info('Root volume downloaded')
 
     _log.info('Clearing up GuestFS')
     g.umount_all()
     _log.info('GuestFS cleared')
+
+    os.rename(systemmappath + '.tmp', systemmappath)
+    os.rename(vmlinuzpath + '.tmp', vmlinuzpath)
+    os.rename(initrdpath + '.tmp', initrdpath)
+    os.rename(rootvolpath + '.tmp', rootvolpath)
 
 
 def get_blkfile_uuid(workdir, filename):
@@ -370,7 +411,7 @@ def phase_msg(phase=None):
         print('DONE: %s' % curphase)
 
 
-def call_osbuild_api(config, url, *, json=None, body=None, body_type=None):
+def call_osbuild_api(config, url, *, json=None, body=None, body_type=None, stream=False):
     socket = config['compose']['composer_api'].replace("/", "%2F")
 
     url = f"http+unix://{socket}/api/v1{url}"
@@ -397,19 +438,19 @@ def call_osbuild_api(config, url, *, json=None, body=None, body_type=None):
             data=body,
             headers={
                 'Content-Type': body_type,
-            })
+            }),
     else:
-        r = session.get(url)
+        r = session.get(url, stream=stream)
 
     _log.debug(f"Response: {r}")
-    result = r.json()
-    _log.debug(f"Result: {result}")
+    if stream:
+        result = r.iter_content
+        _log.debug("Result: <streamed>")
+    else:
+        result = r.json()
+        _log.debug(f"Result: {result}")
     r.raise_for_status()
     return result
-
-
-def compose_info(workdir, config, composeid):
-    raise Exception("composeid: %s" % composeid)
 
 
 def start_compose(workdir, config):
@@ -424,6 +465,72 @@ def start_compose(workdir, config):
     _log.info("Compose started")
 
     return r['build_id']
+
+
+def get_compose_results(workdir, config, composeid):
+    resultsfile = os.path.join(workdir, 'results.tar')
+    if os.path.isfile(resultsfile):
+        return resultsfile
+    res = call_osbuild_api(
+        config,
+        f'/compose/results/{composeid}',
+        stream=True,
+    )
+    totalsize = 0
+    with open(resultsfile + '.tmp', "wb") as f:
+        for chunk in res(chunk_size=4096):
+            totalsize += len(chunk)
+            f.write(chunk)
+    _log.info(f"Retrieved {totalsize / 1024 / 1024}MiB results file")
+    os.rename(resultsfile + '.tmp', resultsfile)
+    return resultsfile
+
+
+def extract_compose_results(workdir, resultsfile, composeid):
+    imagepath = os.path.join(workdir, 'image.raw')
+    if os.path.isfile(imagepath):
+        return imagepath
+    with open(resultsfile, 'rb') as f:
+        with tarfile.TarFile(fileobj=f) as tf:
+            _log.debug(f"Results tarball file contents: {tf.getnames()}")
+            image = tf.getmember(f"{composeid}-disk.raw.xz")
+            _log.debug(f"TarInfo for image: {image}")
+            imgf = tf.extractfile(image)
+            if imgf is None:
+                raise Exception("Image file was not a regular file?")
+            with lzma.LZMAFile(imgf) as imgf:
+                with open(imagepath + '.tmp', 'wb') as outf:
+                    shutil.copyfileobj(imgf, outf)
+    os.rename(imagepath + '.tmp', imagepath)
+    return imagepath
+
+
+def prepare_insert_sys_cert(workdir):
+    SCRIPTPATH_URL = "https://raw.githubusercontent.com/torvalds/linux/master/scripts/insert-sys-cert.c"
+    scriptpath = os.path.join(workdir, 'insert-sys-cert')
+    if os.path.isfile(scriptpath):
+        return scriptpath
+    res = requests.get(SCRIPTPATH_URL)
+    res.raise_for_status()
+    with open(scriptpath + '.c.tmp', 'wb') as f:
+        f.write(res.content)
+    os.rename(scriptpath + '.c.tmp', scriptpath + '.c')
+    run_command([
+        'gcc',
+        '-o', scriptpath,
+        f'{scriptpath}.c',
+    ])
+    return scriptpath
+
+
+def embed_kernel_trusted_key(workdir, keydir):
+    scriptpath = prepare_insert_sys_cert(workdir)
+    run_command([
+        scriptpath,
+        '-s', os.path.join(workdir, 'System.map'),
+        '-b', os.path.join(workdir, 'vmlinuz'),
+        '-c', os.path.join(workdir, 'kernel_trustedkey.pem'),
+    ])
 
 
 def compose(workdir, config, args):
@@ -469,46 +576,46 @@ def compose(workdir, config, args):
     wait_for_compose(config, composeid)
     phase_msg()
 
+    phase_msg('Getting compose results')
+    resultsfile = get_compose_results(workdir, config, composeid)
+    phase_msg()
+
+    phase_msg("Extracting compose results")
+    imagefile = extract_compose_results(workdir, resultsfile, composeid)
+    phase_msg()
+
+    phase_msg('Extracting image contents')
+    extract_image(workdir, imagefile)
+    phase_msg()
+
+    phase_msg('Creating verity hash volume')
+    roothash = create_verity_table(workdir)
+    phase_msg()
+
+    phase_msg('Combining volumes')
+    combine_files(os.path.join(workdir, 'combinedvol'),
+                  os.path.join(workdir, 'rootvol'),
+                  os.path.join(workdir, 'hashvol'),
+                  gzip=True)
+    phase_msg()
+
+    phase_msg('Determining block uuid')
+    rootuuid = get_blkfile_uuid(workdir, 'rootvol')
+    phase_msg()
+
+    phase_msg('Generating kernel command line')
+    create_cmdline(workdir, args.debug_build, config, rootuuid, roothash)
+    phase_msg()
+
+    phase_msg('Embedding trusted key into kernel')
+    embed_kernel_trusted_key(workdir, config['compose']['keydir'])
+    phase_msg()
+
     raise Exception("TODO")
 
-    bodyfile = config['imagefactory'].get('storage_body_path_template',
-                                          vars={'imgid': imgid})
-    if not os.path.isfile(bodyfile):
-        raise ComposeFailure('Unable to find image body at %s' % bodyfile)
-    _log.debug('Image body at: %s', bodyfile)
-
-    if not args.skip_extraction:
-        phase_msg('Extracting image contents')
-        extract_image(workdir, bodyfile)
-        phase_msg()
-
-    if not args.verity_roothash:
-        phase_msg('Creating verity hash volume')
-        roothash = create_verity_table(workdir)
-        phase_msg()
-    else:
-        roothash = args.verity_roothash
-
-    if not os.path.exists(os.path.join(workdir, 'combinedvol')):
-        phase_msg('Combining volumes')
-        combine_files(os.path.join(workdir, 'combinedvol'),
-                      os.path.join(workdir, 'rootvol'),
-                      os.path.join(workdir, 'hashvol'),
-                      gzip=True)
-        phase_msg()
-
-    if not args.skip_efi_generation:
-        phase_msg('Determining block uuid')
-        rootuuid = get_blkfile_uuid(workdir, 'rootvol')
-        phase_msg()
-
-        phase_msg('Generating kernel command line')
-        create_cmdline(workdir, args.debug_build, config, rootuuid, roothash)
-        phase_msg()
-
-        phase_msg('Generating EFI binary')
-        create_efi_binary(workdir, config)
-        phase_msg()
+    phase_msg('Generating EFI binary')
+    create_efi_binary(workdir, config)
+    phase_msg()
 
     if not args.skip_test_image:
         phase_msg('Symlinking files')
@@ -569,6 +676,17 @@ def compose(workdir, config, args):
         phase_msg()
 
 
+def check_keydir(keydir, generate):
+    _log.debug(f"Checking keydir {keydir} with generation {generate}")
+    if not os.path.exists(keydir):
+        raise Exception('Key dir does not exist')
+
+    if not os.path.exists(os.path.join(keydir, 'kernel_trustedkey.pem')):
+        if not generate:
+            raise Exception("Keydir doesn't contain a kernel trusted key")
+        raise Exception("TODO")
+
+
 def main():
     args = parse_args()
     config = ConfigParser()
@@ -584,6 +702,11 @@ def main():
     setup_logging(args.verbose)
 
     _log.debug('Arguments: %s', args)
+
+    if 'keydir' not in config['compose']:
+        raise ComposeFailure('Keydir is required')
+    config['compose']['keydir'] = os.path.abspath(config['compose']['keydir'])
+    check_keydir(config['compose']['keydir'], args.generate_keys)
 
     if args.workdir is None:
         args.workdir = tempfile.mkdtemp(prefix='hatlocker-composer-workdir-')
